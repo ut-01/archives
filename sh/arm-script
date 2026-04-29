@@ -1,0 +1,53 @@
+#!/bin/bash
+
+# ============================================
+# FILL THESE IN
+# ============================================
+COMPARTMENT_ID="ocid1.tenancy.oc1..aaaXXXXXXXXXXXXXXXXXXXXXXXXiq"
+SUBNET_ID="ocid1.subnet.oc1.ap-hyderabad-1.aaaXXXXXXXXXXXXXXXXXXXXXX2h3nmq"
+IMAGE_ID="ocid1.image.oc1.ap-hyderabad-1.aaaXXXXXXXXXXXXXXXXXXXXXXXjq"  # Ubuntu 24.04 full ARM
+# ============================================
+
+SCRIPT_DIR="$(dirname "$0")"
+LOGFILE="$SCRIPT_DIR/arm_creation.log"
+WEBHOOK_URL="WEBHOOK_URL"
+
+ADS=(
+    "xxxxx:AP-HYDERABAD-1-AD-1" # FIND YOUR OWN
+)
+
+INDEX=0
+
+while true; do
+    AD="${ADS[$INDEX]}"
+    echo "[$(date)] Trying $AD..."
+
+    RESULT=$(oci compute instance launch \
+        --availability-domain "$AD" \
+        --compartment-id "$COMPARTMENT_ID" \
+        --shape "VM.Standard.A1.Flex" \
+        --shape-config '{"ocpus": 1, "memoryInGBs": 6}' \
+        --subnet-id "$SUBNET_ID" \
+        --image-id "$IMAGE_ID" \
+        --assign-public-ip true \
+        --ssh-authorized-keys-file "$SCRIPT_DIR/ssh-key-2026-03-09.key.pub" \
+        --display-name "ampere-vm" 2>&1)
+
+    echo "[$(date)] RAW: $RESULT"
+
+    INSTANCE_ID=$(echo "$RESULT" | jq -r '.data.id // empty' 2>/dev/null)
+
+    if [ -n "$INSTANCE_ID" ]; then
+        echo "[$(date)] ✅ SUCCESS! $AD — Instance ID: $INSTANCE_ID"
+        echo "[$(date)] ✅ SUCCESS! $AD — Instance ID: $INSTANCE_ID" >> "$LOGFILE"
+        curl -s -X POST "$WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d '{"source": "Oracle:arm-instance", "message": "AMP Instance created"}'
+        exit 0
+    else
+        echo "[$(date)] ❌ $AD failed" >> "$LOGFILE"
+    fi
+
+    INDEX=$(( (INDEX + 1) % ${#ADS[@]} ))
+    sleep 300
+done
